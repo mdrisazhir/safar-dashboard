@@ -1,0 +1,168 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex">
+<title>Safar Tours · Números</title>
+<style>
+  :root {
+    --texto: #37352f; --suave: #787774; --fondo: #fbf8f3; --borde: #e9e2d6;
+    --verde: #448361; --rojo: #c4554d; --azul: #337ea9; --naranja: #d9730d;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; padding: 16px; background: #fff; color: var(--texto);
+    font-family: ui-sans-serif, -apple-system, "Segoe UI", Helvetica, Arial, sans-serif;
+  }
+  .tarjetas { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 12px; }
+  .tarjeta { background: var(--fondo); border: 1px solid var(--borde); border-radius: 10px; padding: 14px 16px; }
+  .tarjeta small { color: var(--suave); font-size: 13px; }
+  .tarjeta b { display: block; font-size: 30px; font-weight: 650; margin: 4px 0 2px; }
+  .tarjeta span { color: var(--suave); font-size: 12px; }
+  .grafico { margin-top: 12px; background: var(--fondo); border: 1px solid var(--borde); border-radius: 10px; padding: 14px 16px; }
+  .grafico h3 { margin: 12px 0 8px; font-size: 14px; font-weight: 600; }
+  .cabecera { display: flex; flex-wrap: wrap; gap: 8px; justify-content: space-between; align-items: center; }
+  .pestañas { display: inline-flex; background: #f1ebe1; border-radius: 8px; padding: 3px; }
+  .pestañas button { border: 0; background: none; padding: 5px 12px; border-radius: 6px; font: inherit; font-size: 13px; color: var(--suave); cursor: pointer; }
+  .pestañas button.activa { background: #fff; color: var(--texto); font-weight: 600; box-shadow: 0 1px 2px rgba(0,0,0,.08); }
+  .periodo { font-size: 13px; color: var(--suave); }
+  .periodo select { font: inherit; padding: 4px 6px; border: 1px solid var(--borde); border-radius: 6px; background: #fff; color: var(--texto); margin: 0 4px; }
+  .leyenda { font-size: 12px; color: var(--suave); }
+  .leyenda i { display: inline-block; width: 10px; height: 10px; border-radius: 2px; margin: 0 4px 0 10px; }
+  svg text { font-size: 11px; fill: var(--suave); }
+  .mes:hover > rect:first-of-type { fill: #efe6d8; }
+  .pie { margin-top: 8px; font-size: 11px; color: var(--suave); text-align: right; }
+  .aviso { padding: 24px; text-align: center; color: var(--suave); }
+</style>
+</head>
+<body>
+<div id="app" class="aviso">Cargando…</div>
+<script>
+const euros = (n) => n.toLocaleString("es-ES", { style: "currency", currency: "EUR", maximumFractionDigits: 0, useGrouping: "always" });
+const suma = (a) => a.reduce((s, v) => s + v, 0);
+const MESES =["Ene","Feb","Mar","Abr","May","Jun","Jul","Ago","Sep","Oct","Nov","Dic"];
+
+async function descifrar() {
+  const clave = location.hash.slice(1);
+  if (!clave) throw new Error("Falta la clave en el enlace.");
+  const raw = Uint8Array.from(atob(clave.replace(/-/g, "+").replace(/_/g, "/")), (c) => c.charCodeAt(0));
+  const key = await crypto.subtle.importKey("raw", raw, "AES-GCM", false, ["decrypt"]);
+  const { iv, datos } = await (await fetch("data.json", { cache: "no-store" })).json();
+  const b = (s) => Uint8Array.from(atob(s), (c) => c.charCodeAt(0));
+  const plano = await crypto.subtle.decrypt({ name: "AES-GCM", iv: b(iv) }, key, b(datos));
+  return JSON.parse(new TextDecoder().decode(plano));
+}
+
+const corto = (n) => Math.abs(n) >= 1000 ? (n / 1000).toLocaleString("es-ES", { maximumFractionDigits: 1 }) + "k" : Math.round(n);
+// etiquetas, ingresos y gastos tienen la misma longitud; "actual" es el índice a resaltar (-1 si ninguno)
+// y la línea del margen se corta después de él.
+function grafico(etiquetas, ingresos, gastos, actual) {
+  const n = etiquetas.length, margen = ingresos.map((v, i) => v - gastos[i]);
+  const W = 720, H = 240, izq = 44, arriba = 12, abajo = 24, alto = H - arriba - abajo;
+  const bruto = Math.max(...ingresos, ...gastos, 1);
+  const paso = [1, 2, 5, 10].map((f) => f * 10 ** Math.floor(Math.log10(bruto / 4))).find((p) => p * 5 >= bruto);
+  const min = Math.min(0, Math.floor(Math.min(...margen) / paso) * paso), max = Math.ceil(bruto / paso) * paso;
+  const y = (v) => arriba + alto * (1 - (v - min) / (max - min));
+  const col = (W - izq) / n, barra = Math.min(col * 0.3, 40);
+
+  let s = `<svg viewBox="0 0 ${W} ${H}" width="100%">`;
+  for (let v = min; v <= max; v += paso) {
+    s += `<line x1="${izq}" x2="${W}" y1="${y(v)}" y2="${y(v)}" stroke="${v === 0 ? "#cfc6b8" : "#efe9df"}"/>`;
+    s += `<text x="${izq - 6}" y="${y(v) + 4}" text-anchor="end">${corto(v)} €</text>`;
+  }
+  if (actual >= 0) s += `<rect x="${izq + actual * col}" y="${arriba}" width="${col}" height="${alto}" fill="#f3ece1" opacity=".6"/>`;
+  const puntos = [];
+  for (let i = 0; i < n; i++) {
+    const x = izq + i * col + col / 2;
+    s += `<g class="mes"><title>${etiquetas[i]}\nIngresos: ${euros(ingresos[i])}\nGastos: ${euros(gastos[i])}\nMargen: ${euros(margen[i])}</title>`;
+    s += `<rect x="${x - col / 2}" y="${arriba}" width="${col}" height="${alto}" fill="transparent"/>`;
+    s += `<rect x="${x - barra - 1}" y="${y(ingresos[i])}" width="${barra}" height="${y(0) - y(ingresos[i])}" rx="3" fill="var(--verde)"/>`;
+    s += `<rect x="${x + 1}" y="${y(gastos[i])}" width="${barra}" height="${y(0) - y(gastos[i])}" rx="3" fill="var(--naranja)"/></g>`;
+    s += `<text x="${x}" y="${H - 6}" text-anchor="middle" ${i === actual ? 'style="font-weight:700;fill:var(--texto)"' : ""}>${etiquetas[i]}</text>`;
+    if (actual < 0 || i <= actual) puntos.push([x, y(margen[i])]);
+  }
+  s += `<polyline points="${puntos.join(" ")}" fill="none" stroke="var(--azul)" stroke-width="2" stroke-linejoin="round" pointer-events="none"/>`;
+  for (const [cx, cy] of puntos) s += `<circle cx="${cx}" cy="${cy}" r="3" fill="#fff" stroke="var(--azul)" stroke-width="2" pointer-events="none"/>`;
+  return s + "</svg>";
+}
+
+// Estado de la vista: tipo de gráfico y periodo elegido.
+const vista = { tipo: "mensual", año: null, desde: null, hasta: null };
+let D;
+
+function serie() {
+  const hoy = new Date(), añoHoy = hoy.getFullYear();
+  if (vista.tipo === "anual") {
+    const años = Object.keys(D.años).filter((a) => a >= vista.desde && a <= vista.hasta);
+    return {
+      titulo: `Por año · ${vista.desde}–${vista.hasta}`, etiquetas: años,
+      ingresos: años.map((a) => suma(D.años[a].ingresos)), gastos: años.map((a) => suma(D.años[a].gastos)),
+      actual: años.indexOf(String(añoHoy)),
+    };
+  }
+  const a = D.años[vista.año], esteAño = Number(vista.año) === añoHoy;
+  if (vista.tipo === "trimestral") {
+    const t = (x) => [0, 1, 2, 3].map((q) => suma(x.slice(q * 3, q * 3 + 3)));
+    return {
+      titulo: `Por trimestre · ${vista.año}`, etiquetas: ["1T", "2T", "3T", "4T"],
+      ingresos: t(a.ingresos), gastos: t(a.gastos), actual: esteAño ? Math.floor(hoy.getMonth() / 3) : -1,
+    };
+  }
+  return { titulo: `Por mes · ${vista.año}`, etiquetas: MESES, ingresos: a.ingresos, gastos: a.gastos, actual: esteAño ? hoy.getMonth() : -1 };
+}
+
+function pintarGrafico() {
+  const años = Object.keys(D.años).sort();
+  const opciones = (sel) => años.map((a) => `<option ${a === sel ? "selected" : ""}>${a}</option>`).join("");
+  const selector = vista.tipo === "anual"
+    ? `Desde <select data-k="desde">${opciones(vista.desde)}</select> hasta <select data-k="hasta">${opciones(vista.hasta)}</select>`
+    : `Año <select data-k="año">${opciones(vista.año)}</select>`;
+  const s = serie();
+  document.getElementById("grafico").innerHTML = `
+    <div class="cabecera">
+      <div class="pestañas">${["mensual", "trimestral", "anual"].map((t) =>
+        `<button data-t="${t}" class="${t === vista.tipo ? "activa" : ""}">${t[0].toUpperCase() + t.slice(1)}</button>`).join("")}</div>
+      <div class="periodo">${selector}</div>
+    </div>
+    <h3>Ingresos y gastos ${s.titulo.toLowerCase()}</h3>
+    <div class="leyenda">
+      <i style="background:var(--verde)"></i>Ingresos ${euros(suma(s.ingresos))}
+      <i style="background:var(--naranja)"></i>Gastos ${euros(suma(s.gastos))}
+      <i style="background:var(--azul);height:3px;vertical-align:middle"></i>Margen ${euros(suma(s.ingresos) - suma(s.gastos))} · sin IVA
+    </div>
+    ${grafico(s.etiquetas, s.ingresos, s.gastos, s.actual)}`;
+  document.querySelectorAll("[data-t]").forEach((b) => (b.onclick = () => { vista.tipo = b.dataset.t; pintarGrafico(); }));
+  document.querySelectorAll("[data-k]").forEach((el) => (el.onchange = () => {
+    vista[el.dataset.k] = el.value;
+    if (vista.desde > vista.hasta) [vista.desde, vista.hasta] = [vista.hasta, vista.desde];
+    pintarGrafico();
+  }));
+}
+
+function pintar(d) {
+  D = d;
+  const años = Object.keys(d.años).sort();
+  if (!años.length) d.años[d.año] = { ingresos: Array(12).fill(0), gastos: Array(12).fill(0) }, años.push(String(d.año));
+  vista.año = d.años[d.año] ? String(d.año) : años.at(-1);
+  vista.desde = años[0]; vista.hasta = años.at(-1);
+  const tarjeta = (titulo, valor, color, nota) =>
+    `<div class="tarjeta"><small>${titulo}</small><b style="color:${color}">${euros(valor)}</b><span>${nota}</span></div>`;
+  document.getElementById("app").className = "";
+  document.getElementById("app").innerHTML = `
+    <div class="tarjetas">
+      ${tarjeta("Por cobrar", d.porCobrar, "var(--verde)", `${d.nCobrar} facturas emitidas sin cobrar`)}
+      ${tarjeta("Por pagar", d.porPagar, "var(--rojo)", `${d.nPagar} facturas recibidas sin pagar`)}
+      ${tarjeta(`Margen ${d.año}`, d.margen, "var(--azul)", "Ingresos − gastos, sin IVA")}
+    </div>
+    <div class="grafico" id="grafico"></div>
+    <div class="pie">Actualizado: ${new Date(d.actualizado).toLocaleString("es-ES", { timeZone: "Europe/Madrid" })} · pasa el ratón por una barra para ver el detalle</div>`;
+  pintarGrafico();
+}
+
+descifrar().then(pintar).catch((e) => {
+  document.getElementById("app").textContent = "No se pueden mostrar los datos. " + e.message;
+});
+</script>
+</body>
+</html>
